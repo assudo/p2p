@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>PulseP2P — Encrypted Local Chat</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+  <link rel="stylesheet" href="https://assudo.github.io/p2p/style.css" />
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+</head>
+<body>
+
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- 1. Onboarding / Create Profile Screen -->
+  <div id="setup-screen" class="screen">
+    <div class="auth-card">
+      <div class="auth-logo">
+        <i class="fa-solid fa-shield-halved"></i>
+      </div>
+      <h2>अपनी ID और प्रोफ़ाइल बनाएँ</h2>
+      <p class="auth-sub">आपका यूज़रनेम आपके Personal Token से सुरक्षित रहेगा और चैट केवल आपके फ़ोन में सेव होगी।</p>
+
+      <div class="avatar-picker-wrap">
+        <img id="setup-avatar-preview" src="" alt="Avatar" class="avatar-lg" />
+        <label for="setup-avatar-input" class="avatar-edit-btn" title="फ़ोटो चुनें">
+          <i class="fa-solid fa-camera"></i>
+        </label>
+        <input type="file" id="setup-avatar-input" accept="image/*" hidden />
+      </div>
+
+      <div class="input-group">
+        <label><i class="fa-solid fa-at"></i> Unique Username (बदलेगा नहीं)</label>
+        <input type="text" id="setup-username" placeholder="जैसे: angad_rawat" autocomplete="off" />
+      </div>
+
+      <div class="input-group">
+        <label><i class="fa-solid fa-user-tag"></i> Nickname (डिस्प्ले नाम)</label>
+        <input type="text" id="setup-nickname" placeholder="जैसे: अंगद" autocomplete="off" />
+      </div>
+
+      <div class="input-group">
+        <label><i class="fa-solid fa-key"></i> App Lock PIN (4–6 अंक)</label>
+        <input type="password" id="setup-pin" maxlength="6" placeholder="जैसे: 1234" />
+      </div>
+
+      <button id="btn-create-account" class="btn btn-primary full-width">
+        <i class="fa-solid fa-check-circle"></i> प्रोफ़ाइल सुरक्षित करें
+      </button>
+
+      <div class="divider"><span>या पुराना बैकअप रीस्टोर करें</span></div>
+
+      <label for="setup-import-file" class="btn btn-outline full-width">
+        <i class="fa-solid fa-file-import"></i> Backup फ़ाइल (.json) चुनें
+      </label>
+      <input type="file" id="setup-import-file" accept=".json,application/json" hidden />
+
+      <p id="setup-error" class="error-text"></p>
+    </div>
+  </div>
+
+  <!-- 2. PIN Lock Screen -->
+  <div id="lock-screen" class="screen hidden">
+    <div class="auth-card">
+      <div class="auth-logo lock-icon">
+        <i class="fa-solid fa-lock"></i>
+      </div>
+      <h2>ऐप लॉक है</h2>
+      <p class="auth-sub" id="lock-user-label"></p>
+      <div class="input-group">
+        <input type="password" id="unlock-pin-input" maxlength="6" placeholder="अपना PIN डालें" />
+      </div>
+      <button id="btn-unlock-app" class="btn btn-primary full-width">
+        <i class="fa-solid fa-unlock"></i> अनलॉक करें
+      </button>
+      <p id="lock-error" class="error-text"></p>
+    </div>
+  </div>
+
+  <!-- 3. Main App Shell -->
+  <div id="main-app" class="app-shell hidden">
+
+    <header class="app-header">
+      <div class="header-left">
+        <i class="fa-solid fa-bolt brand-icon"></i>
+        <div>
+          <span class="brand-title" id="header-title">Home</span>
+          <span class="header-sub" id="header-sub"></span>
+        </div>
+      </div>
+      <div class="header-right">
+        <button id="btn-manual-sync" class="icon-btn" title="Refresh Presence">
+          <i class="fa-solid fa-rotate"></i>
+        </button>
+        <button id="btn-quick-lock" class="icon-btn danger" title="Lock App">
+          <i class="fa-solid fa-lock"></i>
+        </button>
+      </div>
+    </header>
+
+    <main class="tab-content-area">
+
+      <!-- TAB 1: HOME -->
+      <section id="tab-home" class="tab-panel active">
+        <div class="search-box-wrap">
+          <i class="fa-solid fa-magnifying-glass search-icon"></i>
+          <input type="text" id="home-search-input" placeholder="Username या Nickname से सर्च करें..." />
+          <button id="btn-clear-search" class="clear-search-btn hidden" title="Clear">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+
+        <div class="section-heading">
+          <span><i class="fa-solid fa-users"></i> सभी यूज़र्स</span>
+          <span id="online-count-badge" class="pill-badge">0 Online</span>
+        </div>
+
+        <div id="home-users-list" class="card-list"></div>
+
+        <div class="section-heading" style="margin-top: 8px;">
+          <span><i class="fa-solid fa-ban"></i> Blocked Users</span>
+        </div>
+        <div id="blocked-users-list" class="card-list"></div>
+      </section>
+
+      <!-- TAB 2: CHAT -->
+      <section id="tab-chat" class="tab-panel hidden">
+        <div class="section-heading">
+          <span><i class="fa-solid fa-heart-circle-check"></i> Mutual Chats (Like + Like You)</span>
+        </div>
+        <div id="chat-threads-list" class="card-list"></div>
+      </section>
+
+      <!-- TAB 3: PROFILE -->
+      <section id="tab-profile" class="tab-panel hidden">
+        <div class="profile-card">
+          <div class="avatar-picker-wrap">
+            <img id="profile-avatar-img" src="" alt="Profile" class="avatar-lg" />
+            <label for="profile-avatar-input" class="avatar-edit-btn" title="प्रोफ़ाइल फ़ोटो बदलें">
+              <i class="fa-solid fa-camera"></i>
+            </label>
+            <input type="file" id="profile-avatar-input" accept="image/*" hidden />
+          </div>
+
+          <div class="profile-meta">
+            <h3 id="profile-display-nick"></h3>
+            <span id="profile-display-user" class="muted-text"></span>
+          </div>
+
+          <div class="input-group">
+            <label><i class="fa-solid fa-pen"></i> Nickname बदलें</label>
+            <div class="inline-row">
+              <input type="text" id="profile-nickname-input" placeholder="नया Nickname" />
+              <button id="btn-save-nickname" class="btn btn-primary">
+                <i class="fa-solid fa-floppy-disk"></i> Save
+              </button>
+            </div>
+          </div>
+
+          <div class="token-box">
+            <div class="token-header">
+              <span><i class="fa-solid fa-fingerprint"></i> Personal Username Token</span>
+              <button id="btn-copy-token" class="btn btn-sm btn-ghost">
+                <i class="fa-regular fa-copy"></i> Copy
+              </button>
+            </div>
+            <code id="profile-token-value" class="token-code"></code>
+            <small class="muted-text">यह टोकन आपके यूज़रनेम का प्रमाण है। इसे सुरक्षित रखें।</small>
+          </div>
+
+          <div class="backup-actions">
+            <button id="btn-export-backup" class="btn btn-success full-width">
+              <i class="fa-solid fa-download"></i> Encrypted Backup डाउनलोड करें
+            </button>
+            <label for="profile-import-file" class="btn btn-outline full-width">
+              <i class="fa-solid fa-upload"></i> Backup फ़ाइल से रीस्टोर करें
+            </label>
+            <input type="file" id="profile-import-file" accept=".json,application/json" hidden />
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Bottom 3-Tab Nav -->
+    <nav class="bottom-nav">
+      <button class="nav-item active" data-tab="home">
+        <i class="fa-solid fa-house"></i>
+        <span>Home</span>
+      </button>
+      <button class="nav-item" data-tab="chat">
+        <i class="fa-solid fa-comment-dots"></i>
+        <span>Chat</span>
+        <span id="chat-unread-dot" class="nav-dot hidden"></span>
+      </button>
+      <button class="nav-item" data-tab="profile">
+        <i class="fa-solid fa-user"></i>
+        <span>Profile</span>
+      </button>
+    </nav>
+
+    <!-- DEDICATED FULL-SCREEN CHAT VIEW -->
+    <div id="chat-view-screen" class="chat-view hidden">
+      <div class="chat-view-header">
+        <button id="btn-back-to-chats" class="icon-btn">
+          <i class="fa-solid fa-arrow-left"></i>
+        </button>
+        <img id="chat-peer-avatar" src="" alt="Peer" class="avatar-sm" />
+        <div class="chat-peer-info">
+          <strong id="chat-peer-name"></strong>
+          <span id="chat-peer-sub" class="peer-status-text">E2EE • Checking...</span>
+        </div>
+        <button id="btn-block-peer" class="icon-btn danger" title="Block User">
+          <i class="fa-solid fa-ban"></i>
+        </button>
+        <button id="btn-clear-peer-chat" class="icon-btn" title="Clear Local Chat">
+          <i class="fa-solid fa-trash"></i>
+        </button>
+      </div>
+
+      <div id="chat-messages-box" class="chat-messages-box"></div>
+
+      <form id="chat-send-form" class="chat-composer">
+        <label for="chat-photo-input" class="icon-btn" title="फ़ोटो भेजें">
+          <i class="fa-solid fa-image"></i>
+        </label>
+        <input type="file" id="chat-photo-input" accept="image/*" hidden />
+
+        <input type="text" id="chat-text-input" placeholder="एन्क्रिप्टेड मैसेज लिखें..." autocomplete="off" />
+
+        <button type="submit" class="btn btn-primary send-btn" title="Send">
+          <i class="fa-solid fa-paper-plane"></i>
+        </button>
+      </form>
+    </div>
+
+  </div>
+
+  <script src="https://assudo.github.io/p2p/crypto.js"></script>
+  <script src="https://assudo.github.io/p2p/app.js"></script>
+</body>
+</html>
